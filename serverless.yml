@@ -1,0 +1,111 @@
+configValidationMode: warn
+service: dynadraw-gallery
+variablesResolutionMode: 20210326
+
+plugins:
+  - serverless-python-requirements
+
+provider:
+  name: aws
+  runtime: python2.7
+  stage: prod
+  region: us-west-2
+  memorySize: 512
+  lambdaHashingVersion: 20201221
+  environment:
+    DYNAMODB_TABLE: ${opt:stage, self:provider.stage}-${self:service}
+  iam:
+    role:
+      statements:   
+        - Effect: Allow
+          Action:
+            - dynamodb:Query
+            - dynamodb:Scan
+            - dynamodb:GetItem
+            - dynamodb:PutItem
+            - dynamodb:UpdateItem
+            - dynamodb:DeleteItem
+          Resource: "arn:aws:dynamodb:${opt:region, self:provider.region}:*:table/${self:provider.environment.DYNAMODB_TABLE}"            
+        - Effect: 'Allow'
+          Action:
+            - 'lambda:InvokeFunction'
+          Resource: '*'
+        - Effect: 'Allow'
+          Action:
+            - 'cloudwatch:PutMetricData'
+            - 'cloudwatch:ListMetrics'
+            - 'cloudwatch:GetMetricStatistics'
+          Resource: '*'
+
+custom:
+  pythonRequirements:
+    dockerizePip: true
+
+package:
+ patterns:
+   - config/**
+   
+functions:
+  auth:
+    handler: auth.authorize
+  getInfo:
+    handler: handler.getInfo
+    events:
+      - http:
+          path: /api/info
+          method: get
+          integration: lambda-proxy
+          authorizer: auth
+          cors:
+            origins:
+              - '*'
+            headers:
+              - Content-Type
+              - X-Amz-Date
+              - Authorization
+              - X-Api-Key
+              - X-Amz-Security-Token
+  createreview:
+    handler: gallery/review/post.post
+    events:
+      - http:
+          path: /api/gallery/review
+          method: post
+          cors: true
+          authorizer: auth        
+
+  listreview:
+    handler: gallery/review/get.get
+    events:
+      - http:
+          path: /api/gallery/review
+          method: get
+          cors: true
+          authorizer: auth          
+
+  listpublish:
+    handler: gallery/published/get.get
+    events:
+      - http:
+          path: /api/gallery/published
+          method: get
+          cors: true
+
+resources:
+  Resources:
+    DynaDrawGalleryTable:
+      Type: AWS::DynamoDB::Table
+      DeletionPolicy: Retain # Keeps around the DynamoDB resource when we redeploy/destroy
+      Properties:
+        AttributeDefinitions:
+          -
+            AttributeName: id
+            AttributeType: S
+        KeySchema:
+          -
+            AttributeName: id
+            KeyType: HASH
+        ProvisionedThroughput:
+          ReadCapacityUnits: 1
+          WriteCapacityUnits: 1
+        TableName: ${self:provider.environment.DYNAMODB_TABLE}
